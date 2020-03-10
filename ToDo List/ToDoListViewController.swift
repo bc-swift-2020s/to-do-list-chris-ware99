@@ -7,10 +7,9 @@
 //
 
 import UIKit
+import UserNotifications
 
 class ToDoListViewController: UIViewController {
-    
-    
     
     @IBOutlet weak var tableView: UITableView!
     @IBOutlet weak var addBarButton: UIBarButtonItem!
@@ -23,6 +22,66 @@ class ToDoListViewController: UIViewController {
         tableView.delegate = self
         
         loadData()
+        authorizeLocalNotifications()
+    }
+    
+    func authorizeLocalNotifications() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { (granted, error) in
+            guard error == nil else {
+                print("ERROR: \(error!.localizedDescription)")
+                return
+            }
+            if granted {
+                print("Notifications Authorization Granted")
+            } else {
+                print("The user has denied notifications")
+                //TODO: Put an alert in here telling the user what to do
+            }
+        }
+    }
+    
+    func setNotifications() {
+        guard toDoItems.count > 0 else {
+            return
+        }
+        // remove all notifications
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        
+        // and let's re-create them with the updated data that we just saved
+        for index in 0..<toDoItems.count {
+            if toDoItems[index].reminderSet {
+                let toDoItem = toDoItems[index]
+                toDoItems[index].notificationID = setCalendarNotification(title: toDoItem.name, subtitle: "", body: toDoItem.notes, badgenumber: nil, sound: .default, date: toDoItem.date)
+            }
+        }
+    }
+    
+    func setCalendarNotification(title: String, subtitle: String, body: String, badgenumber: NSNumber?, sound: UNNotificationSound?, date: Date) -> String {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.subtitle = subtitle
+        content.body = body
+        content.sound = sound
+        content.badge = badgenumber
+        
+        // create trigger
+        var dateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        dateComponents.second = 00
+        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
+        
+        // create request
+        let notificationID = UUID().uuidString
+        let request = UNNotificationRequest(identifier: notificationID, content: content, trigger: trigger)
+        
+        // register a request with the notification center
+        UNUserNotificationCenter.current().add(request) { (error) in
+            if let error = error {
+                print("ERROR: \(error.localizedDescription) Yikes, adding notification went wrong!")
+            } else {
+                print("Notification scheduled \(notificationID), title: \(content.title)")
+            }
+        }
+        return notificationID
     }
     
     func loadData() {
@@ -49,6 +108,7 @@ class ToDoListViewController: UIViewController {
         } catch {
             print("ERROR: Could not save data \(error.localizedDescription)")
         }
+        setNotifications()
     }
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
@@ -89,14 +149,24 @@ class ToDoListViewController: UIViewController {
     }
     
 }
-extension ToDoListViewController: UITableViewDelegate, UITableViewDataSource {
+extension ToDoListViewController: UITableViewDelegate, UITableViewDataSource, ListTableViewCellDelegate {
+    func checkBoxToggle(sender: ListTableViewCell) {
+        if let selectedIndexPath = tableView.indexPath(for: sender) {
+            toDoItems[selectedIndexPath.row].completed = !toDoItems[selectedIndexPath.row].completed
+            tableView.reloadRows(at: [selectedIndexPath], with: .automatic)
+            saveData()
+        }
+    }
+    
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return toDoItems.count
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
-        cell.textLabel?.text = toDoItems[indexPath.row].name
+        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath) as! ListTableViewCell
+        cell.delegate = self
+        cell.nameLabel.text = toDoItems[indexPath.row].name
+        cell.checkBoxButton.isSelected = toDoItems[indexPath.row].completed
         return cell
     }
     func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
